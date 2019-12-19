@@ -6,6 +6,7 @@ namespace App\Tests\Unit\Application\CommandHandler;
 
 use App\Application\Command\RegisterUserCommand;
 use App\Application\CommandHandler\RegisterUserHandler;
+use App\Application\Service\Factory\UserFactory;
 use App\Application\Service\PasswordEncoder;
 use App\Application\Service\Uuid;
 use App\Application\Service\Validator;
@@ -18,21 +19,22 @@ class RegisterUserHandlerTest extends KernelTestCase
 {
     public const EMAIL = 'registerUserHanlderTest@eresdev.com';
     public const PASSWORD = 'SomeRandomPassword2348';
-    private PasswordEncoder $passwordEncoder;
+    //private PasswordEncoder $passwordEncoder;
     private Validator $validator;
     private UserSaver $userSaver;
     private Uuid $uuidGenerator;
+    private UserFactory $userFactory;
 
-    protected function setUp()
+    protected function setUp(): void
     {
         static::bootKernel();
-        parent::setUp();
 
-        $this->passwordEncoder = $this->getService(PasswordEncoder::class);
+        //$this->passwordEncoder = $this->getService(PasswordEncoder::class);
         $this->validator = $this->getService(Validator::class);
         $this->userSaver =
             $this->createMock(UserSaver::class);
         $this->uuidGenerator = $this->getService(Uuid::class);
+        $this->userFactory = $this->getService(UserFactory::class);
     }
 
     public function testHandleWithValidData(): void
@@ -48,9 +50,9 @@ class RegisterUserHandlerTest extends KernelTestCase
         );
 
         $handler = new RegisterUserHandler(
-            $this->passwordEncoder,
             $this->validator,
-            $this->userSaver
+            $this->userSaver,
+            $this->userFactory
         );
 
         $handler->handle($command);
@@ -61,8 +63,6 @@ class RegisterUserHandlerTest extends KernelTestCase
      */
     public function testHandleWithInValidEmail(TestData $testData): void
     {
-        $this->expectException(ValidationException::class);
-
         $command = new RegisterUserCommand(
             $this->uuidGenerator->generate(),
             $testData->getInput()['email'],
@@ -70,62 +70,89 @@ class RegisterUserHandlerTest extends KernelTestCase
         );
 
         $handler = new RegisterUserHandler(
-            $this->passwordEncoder,
             $this->validator,
-            $this->userSaver
+            $this->userSaver,
+            $this->userFactory
         );
+
+        $this->expectException(ValidationException::class);
 
         try {
             $handler->handle($command);
         } catch (ValidationException $exception) {
-            $this->assertArrayHasKey($testData->getExpectedValue(), $exception->getMessagesForEndUser()[0]);
-            throw $exception; // so that $this->expectException passes
+            $this->assertArrayHasKey(
+                $testData->getExpectedValue(),
+                $exception->getMessagesForEndUser()[0],
+                $testData->getTestFailureReason()
+            );
+            $this->assertCount(
+                1,
+                $exception->getMessagesForEndUser(),
+                'More than one validation errors found: ' .
+                json_encode($exception->getMessagesForEndUser())
+            );
+            throw $exception;
         }
     }
 
-    public function getInvalidValues() : array
+    public function getInvalidValues(): array
     {
         return [
             [
                 new TestData(
                     ['email' => '', 'password' => self::PASSWORD],
                     'email',
-                    'Validation problem: Given empty email but did not get back email validation error'
+                    'Validation error: ' .
+                    'Given empty email ' .
+                    'but did not get back email validation error'
                 )
             ],
             [
                 new TestData(
                     ['email' => 'invalidEmail', 'password' => self::PASSWORD],
                     'email',
-                    'Validation problem: Given invalid email but did not get back email validation error'
+                    'Validation error: ' .
+                    'Given invalid email ' .
+                    'but did not get back email validation error'
                 )
             ],
             [
                 new TestData(
-                    ['email' => str_repeat("a", 61) . '.eresdev.com', 'password' => self::PASSWORD],
+                    [
+                        'email' => str_repeat("a", 243) . '.eresdev.com',
+                        'password' => self::PASSWORD
+                    ],
                     'email',
-                    'Validation problem: Given too long email but did not get back email validation error'
+                    'Validation error: ' .
+                    'Given too long email ' .
+                    'but did not get back email validation error'
                 )
             ],
             [
                 new TestData(
                     ['email' => self::EMAIL, 'password' => '', 'expectedInvalidField' => 'password'],
                     'password',
-                    'Validation problem: Given empty password but did not get back password validation error'
+                    'Validation error: ' .
+                    'Given empty password ' .
+                    'but did not get back password validation error'
                 )
             ],
             [
                 new TestData(
                     ['email' => self::EMAIL, 'password' => 'foo'],
                     'password',
-                    'Validation problem: Given too short password but did not get back password validation error'
+                    'Validation error: ' .
+                    'Given too short password ' .
+                    'but did not get back password validation error'
                 )
             ],
             [
                 new TestData(
                     ['email' => self::EMAIL, 'password' => str_repeat("a", 4099)],
                     'password',
-                    'Validation problem: Given too long but did not get back password validation error'
+                    'Validation error: ' .
+                    'Given too long password ' .
+                    'but did not get back password validation error'
                 )
             ]
         ];
